@@ -1,0 +1,625 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Less Talk</title>
+<meta name="description" content="Less Talk: an original big-beat homage in Web Audio. Two synthesized voices keep talking; the band keeps getting louder until the brass shuts them down. One HTML file, no libraries. By DOSAYGO STUDIO.">
+<link rel="canonical" href="https://dosaygo-studio.github.io/less-talk/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Less Talk: a big-beat homage in Web Audio">
+<meta property="og:description" content="Two voices keep talking. The band keeps getting louder. A generative piece in one HTML file, no libraries. By DOSAYGO STUDIO.">
+<meta property="og:url" content="https://dosaygo-studio.github.io/less-talk/">
+<meta property="og:image" content="https://dosaygo-studio.github.io/less-talk/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Less Talk: a big-beat homage in Web Audio">
+<meta name="twitter:description" content="Two voices keep talking. The band keeps getting louder. By DOSAYGO STUDIO.">
+<meta name="twitter:image" content="https://dosaygo-studio.github.io/less-talk/og.png">
+<style>
+  :root { --bg:#0b0a0f; --ink:#f3ead7; --brass:#ffb02e; --talk:#7fd6ff; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--ink); overflow:hidden;
+    font-family:ui-sans-serif, system-ui, -apple-system, "Helvetica Neue", sans-serif; -webkit-tap-highlight-color:transparent; }
+  canvas { position:fixed; inset:0; width:100%; height:100%; display:block; touch-action:none; }
+  #ui { position:fixed; inset:0; display:grid; place-items:center; padding:16px; pointer-events:none; }
+  #card { pointer-events:auto; max-width:26rem; text-align:center; padding:28px 22px; border-radius:20px;
+    background:rgba(11,10,15,.72); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); }
+  .kicker { margin:0; font-size:.8rem; letter-spacing:.14em; text-transform:uppercase; opacity:.6; }
+  .after { margin:.35em 0 .9em; font-size:.95rem; opacity:.85; }
+  h1 { margin:0; font-size:clamp(2.6rem, 14vw, 5rem); line-height:.9; letter-spacing:-.03em; text-transform:uppercase; }
+  h1 em { font-style:normal; color:var(--brass); }
+  .blurb { margin:.9em 0 0; opacity:.7; font-size:.95rem; }
+  button { margin-top:1.3em; font:inherit; font-weight:800; font-size:1.2rem; letter-spacing:.1em; text-transform:uppercase;
+    background:var(--brass); color:#170e00; border:0; border-radius:999px; padding:.85em 2.4em; cursor:pointer;
+    box-shadow:0 0 0 6px rgba(255,176,46,.2); }
+  button:focus-visible { outline:3px solid var(--ink); outline-offset:4px; }
+  .hint { margin:1em 0 0; font-size:.75rem; opacity:.5; letter-spacing:.06em; }
+  .playing #card { display:none; }
+  .studio { margin:1.4em 0 0; font-size:.72rem; line-height:1.7; opacity:.55; }
+  .studio a { color:var(--ink); }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="ui"><div id="card">
+  <p class="kicker">an original homage in Web Audio, after</p>
+  <p class="after">"A Little Less Conversation" &middot; Elvis Presley, JXL remix (2002)</p>
+  <h1>Less <em>Talk</em></h1>
+  <p class="blurb">Two voices keep talking. The band keeps getting louder. 114 bpm, best with headphones.</p>
+  <button id="go" type="button">Play</button>
+  <p class="hint">tap the screen or press Esc to stop</p>
+  <p class="studio">A <a href="https://github.com/DOSAYGO-STUDIO">DOSAYGO STUDIO</a> piece &middot; <a href="https://github.com/DOSAYGO-STUDIO/less-talk">source</a><br>
+    more: <a href="https://hackerbook.dosaygo.com">HackerBook</a> &middot; <a href="https://dosaygo-studio.github.io/rain/">rain</a> &middot; <a href="https://dosaygo-studio.github.io/prime-news/">prime-news</a> &middot; <a href="https://dosaygo-studio.github.io/hn-front-page-2035/">HN 2035</a> &middot; <a href="https://dosaygo-studio.github.io/HMDIC/">HMDIC</a></p>
+</div></div>
+
+<script>
+'use strict';
+/* =====================================================================
+   LESS TALK
+   an original homage, after "A Little Less Conversation"
+   (Elvis Presley, JXL remix, 2002)
+
+   Nothing here comes from the record: no words, no melody, no riff.
+   What it borrows is the attitude, written as a program.
+   Two synthesized voices keep chattering. A big-beat band keeps
+   arriving. Each section gives the talkers less room, until the
+   brass shuts them down and does the arguing instead.
+   ===================================================================== */
+
+const BPM   = 114;
+const STEP  = 60 / BPM / 4;   // one sixteenth note, in seconds
+const BAR   = STEP * 16;
+const SWING = 0.09;           // lean on the off-sixteenths
+
+/* ---------- notes ---------- */
+const PC = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 };
+const n  = s => { const [, l, acc, o] = s.match(/^([A-G])([#b]?)(-?\d)$/);
+                  return 12 * (+o + 1) + PC[l] + (acc === '#' ? 1 : acc === 'b' ? -1 : 0); };
+const hz = m => 440 * 2 ** ((m - 69) / 12);
+
+/* ---------- harmony: a D dorian vamp with a bluesy turnaround ---------- */
+const chord = (root, third, voicing) => {
+  const r = n(root), v = voicing.map(n);
+  return { root: r, deg: { 1: 0, 3: third, 5: 7, 7: 10, 8: 12 }, voicing: v,
+           pcs: new Set([r, ...v].map(m => m % 12)) };
+};
+const CH = {
+  Dm9:  chord('D2',  3, ['F3', 'A3', 'C4', 'E4']),
+  G13:  chord('G2',  4, ['F3', 'A3', 'B3', 'E4']),
+  Bb9:  chord('Bb2', 4, ['Ab3', 'C4', 'D4', 'F4']),
+  A7s9: chord('A2',  4, ['G3', 'C4', 'C#4', 'E4']),
+};
+const PROGRESSION = [['Dm9'], ['Dm9'], ['G13'], ['Bb9', 'A7s9']];   // last bar splits in half
+const chordAt = (bar, s) => { const c = PROGRESSION[bar % 4]; return CH[c[s < 8 ? 0 : c.length - 1]]; };
+
+/* ---------- the band, one bar per string (16 sixteenths) ---------- */
+//                1e&a2e&a3e&a4e&a
+const KICK   = [ 'x.....x...x..x..',
+                 'x..x..x...x.....' ];
+const SNARE  =   '....x..g.g..x..g';   // x = backbeat, g = ghost
+const HATS   =   'x.xgx.xgx.xgx.xo';   // o = open
+const BASS   =   '1.18..1.5.7.8.5.';   // chord degrees: 1 3 5 7 8
+const BASS_HALF= '1.........5.....';
+const GUITAR =   'x.xxo..x.xx.o.x.';   // x = muted scratch, o = chord stab
+
+/* ---------- the brass: an original call / answer line in D dorian ---------- */
+//              bar step note  len
+const CALL   = [[0, 0,'A4',1],[0, 3,'C5',1],[0, 4,'D5',3],[0,10,'F5',2],[0,12,'E5',1],[0,13,'D5',3],
+                [1, 6,'C5',1],[1, 7,'D5',1],[1, 8,'A4',4],[1,14,'C5',1]];
+const ANSWER = [[0, 0,'D5',1],[0, 2,'D5',1],[0, 4,'F5',2],[0, 7,'G5',3],[0,12,'F5',1],[0,14,'D5',2],
+                [1, 4,'C5',1],[1, 6,'A4',1],[1, 8,'C5',2],[1,11,'D5',5]];
+const TURN   = [[2, 0,'B4',2],[2, 3,'D5',1],[2, 4,'F5',3],[2,10,'E5',2],[2,12,'D5',2],
+                [3, 0,'F5',1],[3, 2,'F5',1],[3, 4,'D5',2],[3, 8,'E5',1],[3,10,'C#5',2],[3,13,'C5',3]];
+const phrase = lines => { const m = {}; for (const [b, s, note, len] of lines) m[b * 16 + s] = [n(note), len]; return m; };
+const PHRASES = [phrase([...CALL, ...TURN]), phrase([...ANSWER, ...TURN])];
+
+/* ---------- the score ---------- */
+const SCORE = [
+//  section              bars  talk  action  who plays
+  ['small talk',          8,  1.00,  0.10,  { organ:1, hats:'tick' }],
+  ['getting into it',     8,  0.75,  0.45,  { organ:1, kick:1, snare:1, hats:1, bass:1 }],
+  ['the groove',          8,  0.55,  0.60,  { organ:1, kick:1, snare:1, hats:1, bass:1, guitar:1 }],
+  ['impatience',          8,  0.40,  0.80,  { kick:1, snare:'roll', hats:1, bass:1, guitar:1, build:1, stutter:1 }],
+  ['less talk',          16,  0.00,  1.00,  { kick:1, snare:1, hats:1, bass:1, guitar:1, organ:1, horns:1, drop:1 }],
+  ['one more try',        8,  0.90,  0.30,  { organ:1, bass:'half', hats:'tick', cutoff:1 }],
+  ['no more talk',       16,  0.00,  1.00,  { kick:1, snare:1, hats:1, bass:1, guitar:1, organ:1, horns:2, drop:1 }],
+  ['exit',                2,  0.00,  0.50,  { end:1 }],
+].map(([name, bars, talk, act, play]) => ({ name, bars, talk, act, play }));
+
+const SECTION_AT = [];
+let TOTAL_BARS = 0;
+for (const sec of SCORE) { sec.start = TOTAL_BARS; for (let i = 0; i < sec.bars; i++) SECTION_AT.push(sec); TOTAL_BARS += sec.bars; }
+
+/* ---------- the conversation: two formant voices ---------- */
+const VOWELS = [ // F1 F2 F3 (Hz): ah, eh, ee, oh, oo, ae
+  [730, 1090, 2440], [530, 1840, 2480], [270, 2290, 3010],
+  [570, 840, 2410],  [300, 870, 2240],  [660, 1720, 2410],
+];
+function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+/* =====================================================================
+   AUDIO ENGINE
+   ===================================================================== */
+let ctx = null, master, hp, analyser, wave, noise, bus = {}, VOICES = [], timer = null, stepI = 0, nextTime = 0, convo;
+const queue = [];                                   // visual events, stamped in audio time
+const ev = (t, type, data) => queue.push({ t, type, data });
+
+function gainNode(v, ...dests) { const g = ctx.createGain(); g.gain.value = v; for (const d of dests) if (d) g.connect(d); return g; }
+function filter(type, f, q = 1) { const b = ctx.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = q; return b; }
+function osc(type, f, t0, t1) { const o = ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(f, t0); o.start(t0); o.stop(t1); return o; }
+function panner(x, dest) {
+  if (ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = x; p.connect(dest); return p; }
+  return gainNode(1, dest);
+}
+function noiseAt(t, dur) {
+  const s = ctx.createBufferSource(); s.buffer = noise;
+  if (dur > noise.duration - .2) { s.loop = true; s.start(t); s.stop(t + dur); }
+  else s.start(t, Math.random() * (noise.duration - dur - .1), dur);
+  return s;
+}
+// percussive envelope
+function hit(t, a, d, peak, ...dests) {
+  const g = gainNode(0, ...dests), p = g.gain;
+  p.setValueAtTime(1e-4, t); p.exponentialRampToValueAtTime(Math.max(peak, 2e-4), t + a); p.exponentialRampToValueAtTime(1e-4, t + a + d);
+  return g;
+}
+// sustained envelope
+function held(t, dur, peak, a, r, sus, ...dests) {
+  const g = gainNode(0, ...dests), p = g.gain, e = t + Math.max(a, dur);
+  p.setValueAtTime(0, t); p.linearRampToValueAtTime(peak, t + a); p.linearRampToValueAtTime(peak * sus, e); p.linearRampToValueAtTime(0, e + r);
+  return g;
+}
+function softClip(k) { const c = new Float32Array(2048); for (let i = 0; i < c.length; i++) { const x = i / 1023.5 - 1; c[i] = Math.tanh(k * x) / Math.tanh(k); } return c; }
+function impulse(sec, decay) {
+  const len = ctx.sampleRate * sec | 0, b = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) { const d = b.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len) ** decay; }
+  return b;
+}
+
+function buildGraph() {
+  ctx = new (window.AudioContext || window.webkitAudioContext)();
+  noise = ctx.createBuffer(1, ctx.sampleRate * 4, ctx.sampleRate);
+  const nd = noise.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+
+  // master: gain -> tape-ish saturation -> glue compressor -> analyser -> out
+  const comp = ctx.createDynamicsCompressor();
+  comp.threshold.value = -14; comp.ratio.value = 4; comp.attack.value = .003; comp.release.value = .16;
+  const drive = ctx.createWaveShaper(); drive.curve = softClip(1.7); drive.oversample = '2x';
+  analyser = ctx.createAnalyser(); analyser.fftSize = 1024; wave = new Uint8Array(analyser.fftSize);
+  master = gainNode(.62, drive); drive.connect(comp); comp.connect(analyser); analyser.connect(ctx.destination);
+
+  // the band runs through a highpass that the build sweeps up
+  hp = filter('highpass', 20, .9); hp.connect(master);
+  bus.drums  = gainNode(.9, hp);
+  bus.music  = gainNode(.8, hp);
+  bus.guitar = panner(.35, bus.music);
+
+  const verb = ctx.createConvolver(); verb.buffer = impulse(2.4, 2.6); verb.connect(gainNode(.22, master));
+  bus.verb = gainNode(.6, verb);
+
+  const dly = ctx.createDelay(1); dly.delayTime.value = STEP * 3;            // dotted eighth
+  const fb = gainNode(.3), dlp = filter('lowpass', 2200);
+  dly.connect(dlp); dlp.connect(fb); fb.connect(dly); dlp.connect(gainNode(.3, master));
+  bus.fx = gainNode(.35, dly, bus.verb);
+
+  // organ with a rotating-speaker wobble
+  const trem = gainNode(.8, bus.music), lfo = ctx.createOscillator(); lfo.frequency.value = 5.6;
+  lfo.connect(gainNode(.2, trem.gain)); lfo.start();
+  bus.organ = gainNode(.5, trem);
+
+  // the talkers sit in a narrow telephone band, off to the sides
+  const phone = filter('bandpass', 1300, .55); phone.connect(gainNode(2.4, master)); phone.connect(gainNode(.4, bus.verb));
+  bus.talk = gainNode(1, phone);
+  VOICES = [{ f0: 104, k: 1.00, out: panner(-.6, bus.talk) },
+            { f0: 178, k: 1.16, out: panner(.6, bus.talk) }];
+}
+
+/* ---------- instruments ---------- */
+const play = {
+  kick(t, v = 1) {
+    const o = osc('sine', 160, t, t + .5); o.frequency.exponentialRampToValueAtTime(44, t + .11);
+    o.connect(hit(t, .003, .42, v, bus.drums));
+    noiseAt(t, .02).connect(filter('highpass', 3000)).connect(hit(t, .001, .015, v * .35, bus.drums));
+    ev(t, 'kick', v);
+  },
+  snare(t, v = 1) {
+    noiseAt(t, .25).connect(filter('highpass', 1100)).connect(hit(t, .001, .17, v * .55, bus.drums, bus.verb));
+    const b = osc('triangle', 210, t, t + .15); b.frequency.exponentialRampToValueAtTime(150, t + .07);
+    b.connect(hit(t, .001, .08, v * .5, bus.drums));
+    if (v > .4) ev(t, 'snare', v);
+  },
+  hat(t, v = .5, open = false) {
+    noiseAt(t, open ? .35 : .06).connect(filter('highpass', 7800)).connect(hit(t, .001, open ? .28 : .035, v * .28, bus.drums));
+  },
+  crash(t, v = 1) {
+    noiseAt(t, 2).connect(filter('highpass', 4500)).connect(hit(t, .002, 1.9, v * .32, bus.drums, bus.verb));
+    ev(t, 'crash', v);
+  },
+  riser(t, dur) {
+    const f = filter('bandpass', 300, 3); f.frequency.setValueAtTime(300, t); f.frequency.exponentialRampToValueAtTime(7000, t + dur);
+    const g = gainNode(0, master); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(.35, t + dur); g.gain.setValueAtTime(0, t + dur + .005);
+    noiseAt(t, dur + .01).connect(f).connect(g);
+  },
+  bass(t, m, dur, v = .35) {
+    const f = hz(m), lp = filter('lowpass', 2400, 7);
+    lp.frequency.setValueAtTime(2400, t); lp.frequency.exponentialRampToValueAtTime(240, t + .14);
+    const g = held(t, dur, v, .004, .04, .6, bus.music);
+    osc('sawtooth', f, t, t + dur + .1).connect(lp);
+    osc('sine', f, t, t + dur + .1).connect(gainNode(.8, g));
+    lp.connect(g);
+    ev(t, 'bass', m);
+  },
+  horn(t, m, dur, v = .16, fall = false) {
+    const f = hz(m), end = t + dur, lp = filter('lowpass', 600, 1.2);
+    lp.frequency.setValueAtTime(600, t); lp.frequency.linearRampToValueAtTime(4800, t + .035);
+    lp.frequency.exponentialRampToValueAtTime(1700, end + .05);
+    const g = held(t, dur, v, .012, fall ? .5 : .07, .8, bus.music, bus.fx);
+    for (const d of [-12, 0, 10]) {
+      const o = osc('sawtooth', f * .94, t, end + .6); o.detune.value = d;
+      o.frequency.exponentialRampToValueAtTime(f, t + .05);                 // the scoop up into the note
+      if (fall) { o.frequency.setValueAtTime(f, end); o.frequency.exponentialRampToValueAtTime(f * .6, end + .5); }
+      o.connect(lp);
+    }
+    lp.connect(g);
+  },
+  // a section: lead, the nearest chord tone underneath, and the octave below
+  brass(t, m, dur, ch, v = 1, octaveUp = false) {
+    let below = m - 5;
+    for (let d = 3; d <= 9; d++) if (ch.pcs.has((m - d) % 12)) { below = m - d; break; }
+    play.horn(t, m, dur, .16 * v);
+    play.horn(t, below, dur, .12 * v);
+    play.horn(t, m - 12, dur, .1 * v);
+    if (octaveUp) play.horn(t, m + 12, dur, .07 * v);
+    ev(t, 'horn', { m, dur });
+  },
+  stab(t, notes, dur, v = 1) {
+    for (const m of notes) play.horn(t, m, dur, .12 * v);
+    ev(t, 'horn', { m: Math.max(...notes), dur });
+  },
+  organ(t, notes, dur, v = .14) {
+    const g = held(t, dur, v, .012, .09, .9, bus.organ);
+    for (const m of notes) for (const [h, a] of [[1, 1], [2, .55], [3, .3], [4, .18]])
+      osc('sine', hz(m) * h, t, t + dur + .15).connect(gainNode(a * .25, g));
+  },
+  guitar(t, ch, open, v = 1) {
+    const wah = 600 + 1600 * (.5 + .5 * Math.sin(Math.PI * t * BPM / 60));   // one sweep every two beats
+    const bp = filter('bandpass', wah, 4);
+    bp.connect(hit(t, .002, open ? .14 : .028, (open ? .09 : .22) * v, bus.guitar));
+    if (open) for (const m of ch.voicing) osc('sawtooth', hz(m + 12), t, t + .25).connect(bp);
+    else noiseAt(t, .06).connect(bp);
+  },
+  // one syllable: a buzzing source pushed through three moving formants
+  talk(t, who, dur, level, va, vb, rng) {
+    const V = VOICES[who], A = VOWELS[va], B = VOWELS[vb];
+    const f0 = V.f0 * (.9 + rng() * .3);
+    const src = osc('sawtooth', f0, t, t + dur + .1);
+    src.frequency.linearRampToValueAtTime(f0 * (.78 + rng() * .4), t + dur);
+    const g = held(t, dur * .8, level, .015, .05, .55, V.out);
+    [1, .6, .35].forEach((amp, i) => {
+      const bp = filter('bandpass', A[i] * V.k, [9, 12, 14][i]);
+      bp.frequency.setValueAtTime(A[i] * V.k, t); bp.frequency.linearRampToValueAtTime(B[i] * V.k, t + dur);
+      src.connect(bp).connect(gainNode(amp, g));
+    });
+    if (rng() < .5) noiseAt(t, .04).connect(filter('highpass', 3200)).connect(hit(t, .002, .03, level * .25, V.out));
+    ev(t, 'talk', { who, dur });
+  },
+};
+
+/* ---------- who talks, and for how long ---------- */
+function converse(i, t, level, stutter) {
+  const c = convo;
+  if (level <= 0 || i < c.busy) return;
+  if (c.left <= 0) {
+    if (i < c.wait) return;
+    c.who ^= 1; c.left = 3 + (c.rng() * 6 | 0);                      // the other one gets a word in
+  }
+  const len = stutter ? 1 : [1, 1, 2, 2, 3][c.rng() * 5 | 0];
+  const va = stutter && c.last != null ? c.last : c.rng() * VOWELS.length | 0;
+  const vb = stutter ? va : c.rng() * VOWELS.length | 0;
+  play.talk(t, c.who, len * STEP * .95, level * .7, va, vb, c.rng);
+  c.last = va; c.busy = i + len + (c.rng() < .25 ? 1 : 0); c.left--;
+  if (c.left <= 0) c.wait = c.busy + 2 + (c.rng() * 4 | 0) + Math.round((1 - level) * 10);
+}
+
+/* ---------- one sixteenth of the piece ---------- */
+function playStep(i, t) {
+  const bar = i >> 4, s = i & 15;
+  if (bar >= TOTAL_BARS) return false;
+  const sec = SECTION_AT[bar], b = bar - sec.start, p = sec.play, last = b === sec.bars - 1;
+  const ch = chordAt(bar, s);
+  if (s === 0) ev(t, 'bar', { bar, sec, b });
+
+  // the held breath before a drop
+  if (p.build && last && s >= 12) { if (s === 12) ev(t, 'hush'); return true; }
+
+  // the brass interrupts, then a fill back in
+  if (p.cutoff && last && s >= 8) {
+    if (s === 8) { play.stab(t, ch.voicing.map(m => m + 12), 3 * STEP, 1.5); play.kick(t); play.crash(t, .7); ev(t, 'shut'); }
+    if (s >= 12) play.snare(t, .5 + (s - 12) * .15);
+    return true;
+  }
+
+  // the end: one big chord with a fall-off, and one last word nobody hears
+  if (p.end) {
+    if (b === 0 && s === 0) {
+      ['D4', 'F4', 'A4', 'C5', 'E5'].map(n).forEach((m, k) => play.horn(t, m, BAR * 1.1, .12, k > 2));
+      play.bass(t, n('D2'), BAR * 1.2, .4); play.kick(t); play.crash(t);
+      play.organ(t, CH.Dm9.voicing, BAR * 1.3, .12);
+      ev(t, 'horn', { m: n('E5'), dur: BAR }); ev(t, 'end');
+    }
+    if (b === 1 && s === 6) play.talk(t, 0, STEP * 2, .3, 3, 4, convo.rng);
+    return true;
+  }
+
+  /* talk */
+  let talk = sec.talk;
+  if (p.build) talk *= 1 - b / sec.bars * .6;
+  converse(i, t, talk, p.stutter && b >= 4);
+
+  /* drums */
+  if (p.drop && b === 0 && s === 0) { play.crash(t); hp.frequency.setValueAtTime(20, t); }
+  if (p.kick && KICK[b & 1][s] === 'x') play.kick(t, s === 0 ? 1 : .85);
+  if (p.snare === 1) {
+    if (b % 8 === 7 && s >= 12) play.snare(t, .45 + (s - 12) * .15);
+    else if (SNARE[s] === 'x') play.snare(t, .9);
+    else if (SNARE[s] === 'g') play.snare(t, .18);
+  } else if (p.snare === 'roll') {
+    if (b < 4) { if (SNARE[s] === 'x') play.snare(t, .9); }
+    else if (b < 6) { if (s % 4 === 0) play.snare(t, .4 + (b - 4) * .15 + s / 80); }
+    else if (b === 7 || s % 2 === 0) play.snare(t, .5 + (b - 6) * .2 + s / 60);
+  }
+  if (p.hats === 1) {
+    const h = HATS[s];
+    if (h === 'x') play.hat(t, .6); else if (h === 'g') play.hat(t, .22); else if (h === 'o') play.hat(t, .45, true);
+  } else if (p.hats === 'tick' && s % 4 === 2) play.hat(t, .35);
+
+  /* bass */
+  const line = p.bass === 1 ? BASS : p.bass === 'half' ? BASS_HALF : null;
+  if (line && line[s] !== '.') {
+    const cap = p.bass === 'half' ? 8 : 3;
+    let len = 1; while (len < cap && line[(s + len) % 16] === '.') len++;
+    play.bass(t, ch.root + ch.deg[line[s]], len * STEP * .9);
+  }
+
+  /* guitar */
+  if (p.guitar && GUITAR[s] !== '.') play.guitar(t, ch, GUITAR[s] === 'o');
+
+  /* organ */
+  const split = PROGRESSION[bar % 4].length > 1;
+  if (p.organ && (s === 0 || (s === 8 && split))) play.organ(t, ch.voicing, (split ? 8 : 16) * STEP * .97, p.horns ? .08 : .14);
+
+  /* brass */
+  if (p.horns) {
+    const note = PHRASES[(b >> 2) & 1][(b & 3) * 16 + s];
+    if (note) play.brass(t, note[0], note[1] * STEP * .92, ch, 1, p.horns === 2 && b >= 8);
+  }
+
+  /* the build: thin out the low end, raise the noise */
+  if (p.build && b === 0 && s === 0) { hp.frequency.setValueAtTime(20, t); hp.frequency.exponentialRampToValueAtTime(800, t + sec.bars * BAR - 4 * STEP); }
+  if (p.build && b === 4 && s === 0) play.riser(t, 4 * BAR - 4 * STEP);
+  return true;
+}
+
+/* ---------- transport ---------- */
+function tick() {
+  if (!ctx) return;
+  while (nextTime < ctx.currentTime + .15) {
+    if (!playStep(stepI, nextTime)) { finish(nextTime); return; }
+    nextTime += STEP * (stepI & 1 ? 1 - SWING : 1 + SWING);
+    stepI++;
+  }
+}
+function finish(t) {
+  clearInterval(timer); timer = null;
+  const c = ctx;
+  setTimeout(() => { if (ctx === c) stop(true); }, (t - c.currentTime + 2.5) * 1000);
+}
+function start() {
+  if (ctx) return;
+  buildGraph();
+  ctx.resume();
+  convo = { rng: mulberry32(1956), who: 1, left: 0, busy: 0, wait: 2, last: null };
+  stepI = 0; nextTime = ctx.currentTime + .12;
+  queue.length = 0; Object.assign(V, freshVisuals());
+  timer = setInterval(tick, 25); tick();
+  document.body.classList.add('playing');
+}
+function stop(done = false) {
+  if (!ctx) return;
+  clearInterval(timer); timer = null;
+  const c = ctx, m = master; ctx = null;
+  try { m.gain.setTargetAtTime(0, c.currentTime, .04); } catch (e) {}
+  setTimeout(() => c.close().catch(() => {}), 300);
+  queue.length = 0;
+  V.talkT = .5; V.actT = 0; V.hush = 0;
+  document.body.classList.remove('playing');
+  const go = document.getElementById('go');
+  go.textContent = done ? 'Again' : 'Play'; go.focus();
+}
+
+/* =====================================================================
+   PICTURE
+   ===================================================================== */
+const cv = document.getElementById('cv'), g = cv.getContext('2d');
+const calm = matchMedia('(prefers-reduced-motion: reduce)').matches ? .25 : 1;
+let W = 0, H = 0, R = 30;
+function resize() {
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  W = innerWidth; H = innerHeight; R = Math.min(W, H) * .055;
+  cv.width = W * dpr | 0; cv.height = H * dpr | 0; g.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+addEventListener('resize', resize); resize();
+
+const freshVisuals = () => ({ flash: 0, shake: 0, hush: 0, bassGlow: 0, rings: [], bubbles: [], blasts: [], bits: [],
+  mouth: [0, 0], talkM: .5, actM: 0, talkT: .5, actT: 0, title: null, bar: 0, sec: null, side: 0, idleNext: 0 });
+const V = freshVisuals();
+const vclock = () => performance.now() / 1000;
+const BRASS = '255,176,46', TALK = '127,214,255', INK = '243,234,215';
+const headX = who => who ? W * .82 : W * .18, headY = () => H * .72;
+
+function speak(who, dur, now) {
+  const dir = who ? -1 : 1;
+  V.mouth[who] = 1;
+  V.bubbles.push({ x: headX(who) + dir * R * 1.1, y: headY() - R * 1.7, vx: dir * (10 + Math.random() * 25), vy: -(28 + Math.random() * 30),
+    w: R * (1.4 + Math.min(dur, .5) * 5), h: R * .95, who, born: now, life: 2 + Math.random() * 1.2, seed: Math.random() * 6 });
+}
+function pop(k) {
+  for (let j = 0; j < k && V.bubbles.length; j++) {
+    const b = V.bubbles.shift();
+    for (let q = 0; q < 12; q++) { const a = Math.random() * Math.PI * 2, sp = 80 + Math.random() * 260;
+      V.bits.push({ x: b.x, y: b.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 1, c: q % 3 ? TALK : BRASS }); }
+  }
+}
+function handle(e, now) {
+  const d = e.data;
+  switch (e.type) {
+    case 'bar':   V.bar = d.bar; V.sec = d.sec; V.talkT = d.sec.talk; V.actT = d.sec.act; if (d.b === 0) V.title = { text: d.sec.name, born: now }; break;
+    case 'hush':  V.hush = 1; break;
+    case 'kick':  V.hush = 0; V.flash = Math.max(V.flash, .06 + .22 * V.actM); V.rings.push({ r: R, a: .5 * d });
+                  if (V.actM > .55) pop(2); break;
+    case 'snare': V.shake = Math.max(V.shake, d * (.2 + V.actM) * 7); break;
+    case 'crash': V.hush = 0; V.flash = 1; pop(99); break;
+    case 'shut':  V.talkT = 0; V.flash = .7; pop(99); break;
+    case 'bass':  V.bassGlow = 1; break;
+    case 'horn':  V.blasts.push({ m: d.m, dur: d.dur, born: now, side: V.side ^= 1 }); break;
+    case 'talk':  speak(d.who, d.dur, now); break;
+  }
+}
+
+function roundRect(x, y, w, h, r) {
+  g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+}
+
+let lastV = vclock();
+function frame() {
+  requestAnimationFrame(frame);
+  const now = vclock(), dt = Math.min(.05, now - lastV); lastV = now;
+
+  if (ctx) { while (queue.length && queue[0].t <= ctx.currentTime) handle(queue.shift(), now); }
+  else if (now > V.idleNext) {                                          // idle: they chat while they wait
+    speak(Math.random() < .5 ? 0 : 1, .1 + Math.random() * .2, now); V.idleNext = now + .5 + Math.random() * 1.2;
+  }
+
+  const ease = 1 - Math.exp(-dt * 2.5);
+  V.talkM += (V.talkT - V.talkM) * ease; V.actM += (V.actT - V.actM) * ease;
+  V.flash *= Math.exp(-dt * 6); V.shake *= Math.exp(-dt * 14); V.bassGlow *= Math.exp(-dt * 8);
+  V.mouth[0] *= Math.exp(-dt * 7); V.mouth[1] *= Math.exp(-dt * 7);
+  const act = V.actM, cx = W / 2, cy = H * .44;
+
+  // ground
+  g.fillStyle = '#0b0a0f'; g.fillRect(0, 0, W, H);
+  const glow = g.createRadialGradient(cx, H, 0, cx, H, H * .9);
+  glow.addColorStop(0, `rgba(${BRASS},${.05 + .2 * act + .12 * V.bassGlow * act})`); glow.addColorStop(1, 'rgba(11,10,15,0)');
+  g.fillStyle = glow; g.fillRect(0, 0, W, H);
+
+  g.save();
+  const sh = V.shake * calm; g.translate((Math.random() - .5) * sh, (Math.random() - .5) * sh);
+
+  // the waveform: the band's own signal, across the middle
+  if (ctx && analyser) {
+    analyser.getByteTimeDomainData(wave);
+    g.beginPath();
+    for (let i = 0; i < wave.length; i++) { const x = i / (wave.length - 1) * W, y = cy + (wave[i] - 128) / 128 * H * (.12 + .22 * act); i ? g.lineTo(x, y) : g.moveTo(x, y); }
+    g.strokeStyle = `rgba(${BRASS},${.25 + .6 * act})`; g.lineWidth = 1.5 + 2.5 * act; g.stroke();
+  }
+
+  g.globalCompositeOperation = 'lighter';
+  // kick rings
+  for (const r of V.rings) { r.r += dt * (260 + 700 * act); r.a *= Math.exp(-dt * 3);
+    g.beginPath(); g.arc(cx, cy, r.r, 0, Math.PI * 2); g.strokeStyle = `rgba(${BRASS},${r.a})`; g.lineWidth = 2 + 6 * r.a; g.stroke(); }
+  V.rings = V.rings.filter(r => r.a > .02);
+  // brass blasts: bars that shoot in from the edges, height by pitch
+  for (const b of V.blasts) {
+    const age = now - b.born, k = Math.min(1, age / .09), fade = Math.max(0, 1 - age / (b.dur + .45));
+    const y = H * (.78 - Math.min(1, Math.max(0, (b.m - 55) / 30)) * .62), len = W * (.28 + Math.min(b.dur, 1) * .55) * k;
+    const th = (8 + 10 * Math.min(b.dur, .6)) * (.4 + .6 * fade);
+    g.fillStyle = `rgba(${BRASS},${.85 * fade})`;
+    g.fillRect(b.side ? W - len : 0, y - th / 2, len, th);
+    g.fillStyle = `rgba(255,240,200,${.5 * fade})`; g.fillRect(b.side ? W - len : 0, y - th / 6, len, th / 3);
+  }
+  V.blasts = V.blasts.filter(b => now - b.born < b.dur + .5);
+  g.globalCompositeOperation = 'source-over';
+
+  // the talkers
+  const presence = .2 + .8 * Math.max(0, 1 - act * .85);
+  for (const who of [0, 1]) {
+    const x = headX(who), y = headY(), m = V.mouth[who];
+    g.globalAlpha = presence;
+    g.fillStyle = `rgb(${TALK})`; g.beginPath(); g.arc(x, y, R, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#0b0a0f';
+    const look = who ? -R * .18 : R * .18;
+    g.beginPath(); g.arc(x - R * .32 + look, y - R * .22, R * .1, 0, Math.PI * 2); g.arc(x + R * .32 + look, y - R * .22, R * .1, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.ellipse(x + look, y + R * .38, R * .32, R * (.05 + .3 * m), 0, 0, Math.PI * 2); g.fill();
+  }
+  g.globalAlpha = 1;
+
+  // speech bubbles: no words, just the shape of talking
+  for (const b of V.bubbles) {
+    const age = now - b.born, a = Math.max(0, 1 - age / b.life) * presence;
+    b.x += b.vx * dt; b.y += b.vy * dt;
+    const x = b.x - b.w / 2, y = b.y - b.h / 2;
+    g.globalAlpha = a;
+    roundRect(x, y, b.w, b.h, b.h * .45);
+    g.fillStyle = `rgba(${TALK},.14)`; g.fill(); g.strokeStyle = `rgb(${TALK})`; g.lineWidth = 2; g.stroke();
+    const tx = b.who ? x + b.w * .78 : x + b.w * .22;
+    g.beginPath(); g.moveTo(tx - 6, y + b.h - 1); g.lineTo(tx + (b.who ? 10 : -10), y + b.h + 12); g.lineTo(tx + 6, y + b.h - 1);
+    g.fillStyle = `rgba(${TALK},.6)`; g.fill();
+    g.beginPath();                                   // a scribble where words would be
+    for (let k = 0; k <= 24; k++) { const px = x + b.h * .4 + k / 24 * (b.w - b.h * .8), py = b.y + Math.sin(k * 1.3 + b.seed + age * 9) * b.h * .14;
+      k ? g.lineTo(px, py) : g.moveTo(px, py); }
+    g.lineWidth = 2.5; g.stroke();
+  }
+  g.globalAlpha = 1;
+  V.bubbles = V.bubbles.filter(b => now - b.born < b.life && b.y > -b.h);
+  if (V.bubbles.length > 40) V.bubbles.splice(0, V.bubbles.length - 40);
+
+  // shrapnel from popped bubbles
+  for (const p of V.bits) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 420 * dt; p.life -= dt * 1.3;
+    g.fillStyle = `rgba(${p.c},${Math.max(0, p.life)})`; g.fillRect(p.x - 2, p.y - 2, 4, 4); }
+  V.bits = V.bits.filter(p => p.life > 0);
+  g.restore();
+
+  // flash, and the held breath
+  if (V.flash > .01) { g.fillStyle = `rgba(${BRASS},${V.flash * .35 * calm})`; g.fillRect(0, 0, W, H); }
+  if (V.hush) { g.fillStyle = 'rgba(0,0,0,.75)'; g.fillRect(0, 0, W, H); }
+
+  // section title
+  if (ctx && V.title) {
+    const age = now - V.title.born, a = Math.max(0, Math.min(1, age * 4) * (1 - age / 3.2));
+    if (a > 0) {
+      g.fillStyle = `rgba(${INK},${a})`; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.font = `800 ${Math.min(W * .11, 72)}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
+      g.fillText(V.title.text.toUpperCase(), cx, H * .16);
+    }
+  }
+
+  // HUD: the score's position and the two meters
+  if (ctx) {
+    const pad = 16, bw = Math.min(W - pad * 2 - 64, 320), base = H - Math.max(pad, 20);
+    g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+    g.font = '600 11px ui-monospace, Menlo, monospace';
+    g.fillStyle = `rgba(${INK},.6)`;
+    g.fillText(`BAR ${String(V.bar + 1).padStart(2, '0')}/${TOTAL_BARS}  ${V.sec ? V.sec.name.toUpperCase() : ''}`, pad, base - 44);
+    g.textAlign = 'right'; g.fillText('ESC / TAP TO STOP', W - pad, base - 44); g.textAlign = 'left';
+    [['TALK', V.talkM, TALK], ['ACTION', V.actM, BRASS]].forEach(([label, v, c], k) => {
+      const y = base - 22 + k * 18;
+      g.fillStyle = `rgba(${INK},.6)`; g.fillText(label, pad, y + 4);
+      g.fillStyle = `rgba(${INK},.12)`; g.fillRect(pad + 64, y - 4, bw, 6);
+      g.fillStyle = `rgb(${c})`; g.fillRect(pad + 64, y - 4, bw * Math.max(0, Math.min(1, v)), 6);
+    });
+  }
+}
+requestAnimationFrame(frame);
+
+/* ---------- input ---------- */
+document.getElementById('go').addEventListener('click', start);
+cv.addEventListener('pointerdown', () => { if (ctx) stop(); });
+addEventListener('keydown', e => {
+  if (e.key === 'Escape') stop();
+  else if (!ctx && (e.key === ' ' || e.key === 'Enter') && e.target === document.body) { e.preventDefault(); start(); }
+});
+</script>
+</body>
+</html>
